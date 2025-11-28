@@ -1,97 +1,127 @@
-详细对话服务流程
-1. 初始问候阶段
-text
-机器人: "Hello, welcome to KTH Hotel. Do you want to book a room?"
+# Hotel Booking Dialog System
 
-用户选择:
-├── 是 (Yes) → 进入入住日期询问
-└── 否 (No) → 返回空闲状态
-2. 入住日期收集
-text
-机器人: "When would you like to check in? You can say today, tomorrow, or a specific day like Monday."
+A Furhat OS-based hotel booking dialog system that handles complete room reservation interactions.
 
-用户回答:
-├── today/tomorrow → 直接设置日期
-├── 具体星期几 → 设置对应日期  
-└── 其他回答 → 默认设为今天
-    ↓
-转到离店日期询问
-3. 离店日期收集 
-text
-机器人: "Okay. You want to check in [日期]. And when would you like to check out?"
+## 📋 Dialog Flow Overview
 
-用户回答:
-├── tomorrow → 住1晚
-├── 具体星期几 → 设置对应日期
-├── 2 days/3 days → 住2-3晚
-└── 其他回答 → 默认明天离店
-    ↓
-转到住客人数询问
-4. 住客人数收集
-text
-机器人: "How many people will be staying? You can say 1, 2, 3, or 4 people."
+### 1. Initial Greeting (HotelGreeting)
+**Process:**
+- Furhat: Greets and asks if user wants to book a room
+- User responses:
+  - **Yes** → Proceed to date inquiry
+  - **No** → Return to idle state
+  - **Other** → Re-ask the question
 
-用户回答处理:
-├── 明确数字 (1-4) → 设置人数
-├── "just me"/"couple" → 智能推断
-├── "family"/"group" → 默认4人
-└── 无法识别 → 要求重新输入
-    ↓
-转到房型选择
-5. 房型选择
-text
-根据住客人数提供不同选项:
+**Possible Paths:**
+- `User: "yes"` → AskCheckInDate
+- `User: "no"` → Idle
+- `User: "maybe"` → Re-ask
+- `User: "I want to book"` → AskCheckInDate
 
-1人住客:
-├── 选项1: Standard Single Room (800 SEK)
-└── 选项2: Deluxe Single Room (1200 SEK)
+### 2. Check-in Date Inquiry (AskCheckInDate)
+**Process:**
+- Asks for specific check-in date
+- Recognizes keywords: today, tomorrow, days of week
 
-2+人住客:
-├── 选项1: Standard Double Room (1500 SEK)  
-└── 选项2: Deluxe Double Room (2000 SEK)
+**Possible Paths:**
+- `User: "today"` → Set today, goto AskCheckOutDate
+- `User: "tomorrow"` → Set tomorrow, goto AskCheckOutDate
+- `User: "Monday"` → Set Monday, goto AskCheckOutDate
+- `User: "next week"` → Default to today, goto AskCheckOutDate
 
-用户选择方式:
-├── 数字选择 (1/2)
-├── 房间名称
-└── 无法识别 → 重新询问
-    ↓
-转到楼层偏好
-6. 楼层偏好
-text
-机器人根据房型智能推荐:
-├── 豪华房 → 推荐高楼层(视野好)
-└── 标准房 → 说明两种选择
+### 3. Check-out Date Inquiry (AskCheckOutDate)
+**Process:**
+- Asks for check-out date based on check-in date
+- Recognizes relative and absolute dates
 
-用户偏好:
-├── lower/ground → 低楼层
-├── higher/upper → 高楼层  
-├── view → 高楼层带视野
-├── quiet → 安静楼层
-└── 其他 → 无特殊偏好
-    ↓
-转到早餐选择
-7. 早餐选择 (AskBreakfast)
-text
-智能推荐策略:
-├── 豪华房 → 强烈推荐早餐
-├── 多人入住 → 强调多样性
-└── 单人入住 → 描述早餐内容
+**Possible Paths:**
+- `User: "tomorrow"` → 1 night, goto AskNumberOfGuests
+- `User: "in 2 days"` → 2 nights, goto AskNumberOfGuests
+- `User: "Friday"` → Set Friday, goto AskNumberOfGuests
+- `User: "3 days"` → 3 nights, goto AskNumberOfGuests
 
-价格计算: 100 SEK/人
-    ↓
-用户选择:
-├── 是 → 包含早餐
-└── 否 → 不含早餐
-    ↓
-转到最终确认
-8. 最终确认 (ConfirmBooking)
-text
-机器人总结所有信息:
-"Standard Single Room, checking in today, checking out tomorrow, for 1 person, no specific floor preference, without breakfast. Total: 800 SEK per night"
+### 4. Number of Guests (AskNumberOfGuests)
+**Process:**
+- Asks for number of guests (1-4 people)
+- Supports numeric and textual recognition
 
-用户确认:
-├── 确认正确 → 生成预订编号 → 完成
-├── 信息有误 → 重新开始预订
-├── 要求重复 → 重新说明详情
-└── 询问价格 → 说明价格后重新确认
+**Possible Paths:**
+- `User: "1" / "one"` → 1 person, goto AskRoomType
+- `User: "2" / "couple"` → 2 people, goto AskRoomType
+- `User: "family"` → Default 4 people, goto AskRoomType
+- `User: "5"` → Re-ask (out of range)
+- `User: "just me"` → 1 person, goto AskRoomType
 
+### 5. Room Type Selection (AskRoomType)
+**Process:**
+- Provides different room options based on guest count
+- Select room by number or name
+
+**Paths for 1 person:**
+- `User: "1"` → Standard Single Room, goto AskFloorPreference
+- `User: "2"` → Deluxe Single Room, goto AskFloorPreference
+- `User: "standard single"` → Standard Single Room, goto AskFloorPreference
+
+**Paths for 2+ people:**
+- `User: "1"` → Standard Double Room, goto AskFloorPreference
+- `User: "2"` → Deluxe Double Room, goto AskFloorPreference
+- `User: "deluxe double"` → Deluxe Double Room, goto AskFloorPreference
+
+### 6. Floor Preference (AskFloorPreference)
+**Process:**
+- Intelligently recommends floors based on room type
+- Collects floor preferences
+
+**Possible Paths:**
+- `User: "lower floor"` → Lower floor, goto AskBreakfast
+- `User: "higher floor"` → Higher floor, goto AskBreakfast
+- `User: "quiet"` → Quiet floor, goto AskBreakfast
+- `User: "view"` → View floor, goto AskBreakfast
+- `User: other responses` → No preference, goto AskBreakfast
+
+### 7. Breakfast Selection (AskBreakfast)
+**Process:**
+- Intelligently recommends breakfast options
+- Calculates breakfast cost
+
+**Possible Paths:**
+- `User: "yes"` → Include breakfast, goto ConfirmBooking
+- `User: "no"` → No breakfast, goto ConfirmBooking
+- `User: ambiguous responses` → Re-ask
+
+### 8. Final Confirmation (ConfirmBooking)
+**Process:**
+- Summarizes all booking information
+- Final confirmation or modification
+
+**Possible Paths:**
+- `User: "yes"` → Complete booking, generate ID, return to Idle
+- `User: "no"` → Restart booking process
+- `User: "repeat"` → Repeat information, re-confirm
+- `User: "price"` → Explain price, re-confirm
+- `User: other responses` → Request clear confirmation
+
+## 🔧 Special Interaction Scenarios
+
+### Error Handling
+- **Unrecognized responses** → Re-ask current question
+- **Out-of-range values** → Prompt for valid range and re-ask
+- **Logical conflicts** → Prompt and re-select
+
+### User Interruption
+- Saying "no" or negative at any time → May exit flow
+- Requesting changes at confirmation → Restart entire flow
+
+## 💾 Data Management
+
+- Uses `userBookings` Map for temporary user data storage
+- Clears user data after booking completion
+- Supports multiple simultaneous users
+
+## ✨ System Features
+
+1. **Linear Flow**: Strict step-by-step information collection
+2. **Conditional Branching**: Intelligent jumps based on user responses
+3. **Error Recovery**: Re-asks when unrecognized
+4. **Personalization**: Smart recommendations based on previous choices
+5. **Confirmation Mechanism**: Final confirmation to prevent booking errors
