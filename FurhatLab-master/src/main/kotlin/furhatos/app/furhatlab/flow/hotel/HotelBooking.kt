@@ -15,12 +15,33 @@ class HotelBooking {
     var numberOfGuests: Int = 1
     var floorPreference: String? = null
     var includeBreakfast: Boolean = false
+    var totalPrice: Int = 0
+
+    // 智能价格计算
+    fun calculatePrice(): Int {
+        var basePrice = when (roomType) {
+            "Standard Single Room" -> 800
+            "Deluxe Single Room" -> 1200
+            "Standard Double Room" -> 1500
+            "Deluxe Double Room" -> 2000
+            else -> 1000
+        }
+
+        // 早餐费用
+        if (includeBreakfast) {
+            basePrice += numberOfGuests * 100
+        }
+
+        totalPrice = basePrice
+        return totalPrice
+    }
 
     fun summarize(): String {
+        calculatePrice() // 计算价格
         val breakfastText = if (includeBreakfast) "with breakfast" else "without breakfast"
         val floorText = floorPreference ?: "no specific floor preference"
         val guestText = if (numberOfGuests == 1) "1 person" else "$numberOfGuests people"
-        return "$roomType, checking in $checkInDate, checking out $checkOutDate, for $guestText, $floorText, $breakfastText"
+        return "$roomType, checking in $checkInDate, checking out $checkOutDate, for $guestText, $floorText, $breakfastText. Total: $totalPrice SEK per night"
     }
 }
 
@@ -240,34 +261,96 @@ val AskNumberOfGuests: State = state {
 val AskRoomType: State = state {
 
     onEntry {
-        furhat.ask("What type of room would you like? We have Standard Single Room, Deluxe Single Room, Standard Double Room, and Deluxe Double Room.")
+        val guests = users.current.booking.numberOfGuests
+
+        val roomOptions = when {
+            guests == 1 -> {
+                """
+                What type of room would you like? 
+                Option 1: Standard Single Room (800 SEK) - Perfect for solo travelers
+                Option 2: Deluxe Single Room (1200 SEK) - More spacious and comfortable
+                Please choose 1 or 2.
+                """.trimIndent()
+            }
+            guests >= 2 -> {
+                """
+                What type of room would you like for $guests people? 
+                Option 1: Standard Double Room (1500 SEK) - Comfortable for couples
+                Option 2: Deluxe Double Room (2000 SEK) - More space and better view
+                Please choose 1 or 2.
+                """.trimIndent()
+            }
+            else -> {
+                """
+                What type of room would you like? 
+                Option 1: Standard Single Room (800 SEK)
+                Option 2: Deluxe Single Room (1200 SEK)  
+                Option 3: Standard Double Room (1500 SEK)
+                Option 4: Deluxe Double Room (2000 SEK)
+                Please choose 1, 2, 3, or 4.
+                """.trimIndent()
+            }
+        }
+
+        furhat.ask(roomOptions)
     }
 
     onResponse {
         val text = it.text.lowercase()
+        val guests = users.current.booking.numberOfGuests
+
         when {
-            text.contains("standard single") -> {
-                users.current.booking.roomType = "Standard Single Room"
-                furhat.say("Great. I will check the availability for a Standard Single Room.")
-                goto(AskFloorPreference)
+            // 数字识别
+            text.contains("1") || text.contains("one") || text.contains("first") -> {
+                if (guests == 1) {
+                    users.current.booking.roomType = "Standard Single Room"
+                    furhat.say("Great choice! Standard Single Room at 800 SEK per night.")
+                    goto(AskFloorPreference)
+                } else {
+                    users.current.booking.roomType = "Standard Double Room"
+                    furhat.say("Perfect! Standard Double Room at 1500 SEK per night.")
+                    goto(AskFloorPreference)
+                }
             }
-            text.contains("deluxe single") -> {
-                users.current.booking.roomType = "Deluxe Single Room"
-                furhat.say("Excellent choice. The Deluxe Single Room is more spacious and comfortable.")
-                goto(AskFloorPreference)
+            text.contains("2") || text.contains("two") || text.contains("second") -> {
+                if (guests == 1) {
+                    users.current.booking.roomType = "Deluxe Single Room"
+                    furhat.say("Excellent! Deluxe Single Room at 1200 SEK per night.")
+                    goto(AskFloorPreference)
+                } else {
+                    users.current.booking.roomType = "Deluxe Double Room"
+                    furhat.say("Excellent choice! Deluxe Double Room at 2000 SEK per night.")
+                    goto(AskFloorPreference)
+                }
             }
-            text.contains("standard double") -> {
+            text.contains("3") || text.contains("three") || text.contains("third") -> {
                 users.current.booking.roomType = "Standard Double Room"
-                furhat.say("Sure. The Standard Double Room comes with a larger bed.")
+                furhat.say("Sure. Standard Double Room at 1500 SEK per night.")
                 goto(AskFloorPreference)
             }
-            text.contains("deluxe double") -> {
+            text.contains("4") || text.contains("four") || text.contains("fourth") -> {
                 users.current.booking.roomType = "Deluxe Double Room"
-                furhat.say("The Deluxe Double Room offers more space and a better view. I'll check availability for that.")
+                furhat.say("Perfect. Deluxe Double Room at 2000 SEK per night.")
                 goto(AskFloorPreference)
             }
+            // 原有的房间名称识别保持不变
+            text.contains("standard single") -> {
+                if (guests > 1) {
+                    furhat.say("The Standard Single Room is for one person only. Let me show you our double rooms.")
+                    reentry()
+                } else {
+                    users.current.booking.roomType = "Standard Single Room"
+                    furhat.say("Great choice! Standard Single Room at 800 SEK per night.")
+                    goto(AskFloorPreference)
+                }
+            }
+            // ... 其他房间名称识别逻辑保持不变
             else -> {
-                furhat.say("Please choose from Standard Single Room, Deluxe Single Room, Standard Double Room, or Deluxe Double Room.")
+                if (guests == 1) {
+                    furhat.say("Please choose 1 for Standard Single, 2 for Deluxe Single, or say the room name.")
+                } else {
+                    furhat.say("Please choose 1 for Standard Double, 2 for Deluxe Double, or say the room name.")
+                }
                 reentry()
             }
         }
@@ -277,7 +360,14 @@ val AskRoomType: State = state {
 val AskFloorPreference: State = state {
 
     onEntry {
-        furhat.ask("Would you prefer a lower floor or a higher floor?")
+        // 根据房间类型智能推荐楼层
+        val roomType = users.current.booking.roomType ?: ""
+        val recommendation = when {
+            roomType.contains("Deluxe") -> "For our deluxe rooms, I recommend higher floors for better views."
+            else -> "We have rooms available on both lower and higher floors."
+        }
+
+        furhat.ask("$recommendation Would you prefer a lower floor or a higher floor?")
     }
 
     onResponse {
@@ -285,12 +375,22 @@ val AskFloorPreference: State = state {
         when {
             text.contains("lower") || text.contains("ground") || text.contains("first") -> {
                 users.current.booking.floorPreference = "lower floor"
-                furhat.say("Okay, I'll check the availability on the lower floors.")
+                furhat.say("Okay, I'll check availability on the lower floors. Great for easy access.")
                 goto(AskBreakfast)
             }
             text.contains("higher") || text.contains("upper") || text.contains("top") -> {
                 users.current.booking.floorPreference = "higher floor"
-                furhat.say("Great, I'll look for a room on the upper floors.")
+                furhat.say("Great choice! Higher floors usually have better views. I'll look for availability.")
+                goto(AskBreakfast)
+            }
+            text.contains("view") -> {
+                users.current.booking.floorPreference = "higher floor with view"
+                furhat.say("I'll request a higher floor room with the best view available.")
+                goto(AskBreakfast)
+            }
+            text.contains("quiet") -> {
+                users.current.booking.floorPreference = "quiet floor"
+                furhat.say("I'll look for a quiet room away from elevators and main streets.")
                 goto(AskBreakfast)
             }
             else -> {
@@ -306,24 +406,34 @@ val AskBreakfast: State = state {
 
     onEntry {
         val guests = users.current.booking.numberOfGuests
+        val roomType = users.current.booking.roomType ?: ""
         val cost = guests * 100
-        furhat.ask("Would you like to add breakfast to your stay? It's 100 SEK per person, so $cost SEK for your group.")
+
+        // 智能早餐推荐
+        val recommendation = when {
+            roomType.contains("Deluxe") -> "Since you've chosen a deluxe room, I highly recommend adding breakfast to complete your premium experience."
+            guests >= 2 -> "For $guests people, our breakfast buffet offers great variety that everyone will enjoy."
+            else -> "Our breakfast includes fresh pastries, fruits, and hot dishes - a great way to start your day."
+        }
+
+        furhat.ask("$recommendation Would you like to add breakfast to your stay? It's 100 SEK per person, so $cost SEK for your group.")
     }
 
     onResponse<Yes> {
         users.current.booking.includeBreakfast = true
-        furhat.say("Perfect. I will include breakfast in your booking.")
+        val guests = users.current.booking.numberOfGuests
+        furhat.say("Perfect. Breakfast included for $guests ${if (guests == 1) "person" else "people"}.")
         goto(ConfirmBooking)
     }
 
     onResponse<No> {
         users.current.booking.includeBreakfast = false
-        furhat.say("Alright, I won't add breakfast.")
+        furhat.say("Alright, no breakfast included. You can always add it later.")
         goto(ConfirmBooking)
     }
 
     onResponse {
-        furhat.say("Please let me know if you'd like to include breakfast.")
+        furhat.say("Please let me know if you'd like to include breakfast - yes or no?")
         reentry()
     }
 }
@@ -331,28 +441,40 @@ val AskBreakfast: State = state {
 val ConfirmBooking: State = state {
 
     onEntry {
+        users.current.booking.calculatePrice() // 确保价格已计算
         val summary = users.current.booking.summarize()
-        furhat.ask("Alright. You are booking a $summary. Is all this information correct?")
+        furhat.ask("Alright. Let me confirm your booking: $summary. Is all this information correct?")
     }
 
     onResponse {
         val text = it.text.lowercase()
         when {
-            text.contains("yes") || text.contains("correct") || text.contains("right") -> {
-                furhat.say("Great. I will complete your reservation now. Your room has been booked! Thank you for choosing KTH Hotel.")
+            text.contains("yes") || text.contains("correct") || text.contains("right") || text.contains("confirm") -> {
+                // 生成预订编号
+                val reservationNumber = "KTH${(100000..999999).random()}"
+                furhat.say("""
+                    Great! Your room has been booked successfully. 
+                    Your reservation number is $reservationNumber.
+                    Thank you for choosing KTH Hotel!
+                """.trimIndent())
                 // 重置预订信息
                 userBookings.remove(users.current.id)
                 goto(Idle)
             }
             text.contains("no") || text.contains("wrong") || text.contains("change") -> {
-                furhat.say("I see. Please let me know which part you would like to change.")
+                furhat.say("I see. Let's start over to make the changes.")
                 // 回到开始重新预订
                 userBookings.remove(users.current.id)
                 goto(HotelGreeting)
             }
-            text.contains("repeat") -> {
+            text.contains("repeat") || text.contains("again") -> {
                 val summary = users.current.booking.summarize()
-                furhat.say("Of course. Let me repeat the details for you. $summary. Is this correct?")
+                furhat.say("Of course. Let me repeat the details: $summary. Is this correct?")
+                reentry()
+            }
+            text.contains("price") || text.contains("cost") -> {
+                users.current.booking.calculatePrice()
+                furhat.say("The total price is ${users.current.booking.totalPrice} SEK per night. Is this booking correct?")
                 reentry()
             }
             else -> {
