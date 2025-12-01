@@ -2,10 +2,12 @@ package furhatos.app.furhatlab.flow.hotel
 
 import furhatos.app.furhatlab.flow.Idle
 import furhatos.flow.kotlin.*
+import furhatos.gestures.Gestures
 import furhatos.nlu.common.No
 import furhatos.nlu.common.Yes
 import furhatos.nlu.common.RequestRepeat
 import furhatos.records.User
+
 
 // 用户数据类，存储预订信息
 class HotelBooking {
@@ -52,22 +54,167 @@ private val userBookings = mutableMapOf<String, HotelBooking>()
 val User.booking: HotelBooking
     get() = userBookings.getOrPut(this.id) { HotelBooking() }
 
+
+// waiting queue
+
+val hotelWaitingQueue = mutableListOf<User>()
+
+fun enqueueHotelUser(u: User) {
+    if (hotelWaitingQueue.none { it.id == u.id }) {
+        hotelWaitingQueue.add(u)
+    }
+}
+
+fun removeHotelUser(u: User) {
+    hotelWaitingQueue.removeAll { it.id == u.id }
+}
+
+//fun removeHotelUserById(userId: String?) {
+//    if (userId == null) return
+//    hotelWaitingQueue.removeAll { it.id == userId }
+//}
+
+
+
+enum class NewUserStrategy {
+    IGNORE, // fake
+    TALK_AND_TURN,
+    GLANCE
+}
+
+/**
+ * do not use IGNORE!!!
+ * Instead, go to init.kt, and change maxUsers = 1
+ * */
+
+var currentNewUserStrategy = NewUserStrategy.GLANCE   // change distraction mode
+
+
+
+/**
+ * User2 is our actor, who will be waiting for check-in too, and thus, should not leave.
+ * Let User1 not sit in exact front of Furhat. Instead, sit on left front.
+ * Then User2 comes to wait and keeps sitting on right front and a little bit behind User1.
+ * Before begin, tell User1 that there will be a second user coming and queueing. No need to interact with User2.
+ * */
+
+
+
+// parent
+
+val HotelInteraction: State = state {
+
+    onUserEnter { newcomer ->
+
+
+        enqueueHotelUser(newcomer)
+        val first = hotelWaitingQueue.firstOrNull() ?: newcomer
+
+        if (newcomer.id != first.id) {
+
+            when (currentNewUserStrategy) {
+
+                NewUserStrategy.IGNORE -> {  // fake
+                    furhat.listen()
+
+                }
+
+
+                NewUserStrategy.TALK_AND_TURN -> {
+
+
+                    furhat.attend(newcomer)
+                    delay(1000)
+                    furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
+                    furhat.say("Hi, I see you. I will help you as soon as I finish this booking.")
+                    furhat.attend(first)
+                    delay(800)
+                    reentry()
+                }
+
+                NewUserStrategy.GLANCE -> {
+
+                    furhat.attend(newcomer)
+                    delay(1000)
+                    furhat.gesture(Gestures.Smile(duration =  0.7, strength = 1.0))
+                    furhat.attend(first)
+                    delay(800)
+                    reentry()
+                }
+            }
+        } else {
+            furhat.attend(newcomer)
+            goto(HotelGreeting)
+        }
+    }
+
+    onUserLeave { leaving ->
+        val wasActive = hotelWaitingQueue.isNotEmpty() &&
+                hotelWaitingQueue.first().id == leaving.id
+
+        removeHotelUser(leaving)
+
+        if (wasActive) {
+            val next = hotelWaitingQueue.firstOrNull()
+            if (next != null) {
+                furhat.attend(next)
+                goto(HotelGreeting)
+            } else {
+                goto(Idle)
+            }
+        } else {
+            if (furhat.isListening) {
+                furhat.listen()
+            } else {
+                reentry()
+            }
+        }
+    }
+
+    onResponse<RequestRepeat> {
+        reentry()
+    }
+
+    onNoResponse {
+        furhat.say("Sorry, I didn't hear you.")
+        reentry()
+    }
+}
+
 // 酒店预订主状态流
-val HotelGreeting: State = state {
+val HotelGreeting: State = state(HotelInteraction) {
 
     onEntry {
+
+        users.current?.let { current ->
+            removeHotelUser(current)
+            // queue tester
+            hotelWaitingQueue.add(0, current)
+        }
+
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
         furhat.say("Hello, welcome to KTH Hotel. Do you want to book a room?")
         furhat.listen()
     }
 
     onResponse<Yes> {
+        furhat.gesture(Gestures.Nod(duration =  1.0, strength = 0.7))
         furhat.say("No problem. I can help you make a reservation.")
         goto(AskCheckInDate)
     }
 
     onResponse<No> {
         furhat.say("Okay, please let me know if you change your mind.")
-        goto(Idle)
+
+        removeHotelUser(users.current)
+
+        val next = hotelWaitingQueue.firstOrNull()
+        if (next != null) {
+            furhat.attend(next)
+            reentry()
+        } else {
+            goto(Idle)
+        }
     }
 
     onResponse {
@@ -76,9 +223,11 @@ val HotelGreeting: State = state {
     }
 }
 
-val AskCheckInDate: State = state {
+val AskCheckInDate: State = state(HotelInteraction) {
 
     onEntry {
+        delay(500)
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
         furhat.ask("When would you like to check in? You can say today, tomorrow, or a specific day like Monday.")
     }
 
@@ -139,10 +288,12 @@ val AskCheckInDate: State = state {
     }
 }
 
-val AskCheckOutDate: State = state {
+val AskCheckOutDate: State = state(HotelInteraction) {
 
     onEntry {
         val checkIn = users.current.booking.checkInDate
+        delay(800)
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
         furhat.ask("Okay. You want to check in $checkIn. And when would you like to check out?")
     }
 
@@ -208,9 +359,11 @@ val AskCheckOutDate: State = state {
     }
 }
 
-val AskNumberOfGuests: State = state {
+val AskNumberOfGuests: State = state(HotelInteraction) {
 
     onEntry {
+        delay(700)
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
         furhat.ask("How many people will be staying? You can say 1, 2, 3, or 4 people.")
     }
 
@@ -258,7 +411,7 @@ val AskNumberOfGuests: State = state {
     }
 }
 
-val AskRoomType: State = state {
+val AskRoomType: State = state(HotelInteraction) {
 
     onEntry {
         val guests = users.current.booking.numberOfGuests
@@ -267,31 +420,33 @@ val AskRoomType: State = state {
             guests == 1 -> {
                 """
                 What type of room would you like? 
-                Option 1: Standard Single Room (800 SEK) - Perfect for solo travelers
-                Option 2: Deluxe Single Room (1200 SEK) - More spacious and comfortable
+                Option 1: Standard Single Room (800 SEK) - Perfect for solo travelers.
+                Option 2: Deluxe Single Room (1200 SEK) - More spacious and comfortable.
                 Please choose 1 or 2.
                 """.trimIndent()
             }
             guests >= 2 -> {
                 """
                 What type of room would you like for $guests people? 
-                Option 1: Standard Double Room (1500 SEK) - Comfortable for couples
-                Option 2: Deluxe Double Room (2000 SEK) - More space and better view
+                Option 1: Standard Double Room (1500 SEK) - Comfortable for couples.
+                Option 2: Deluxe Double Room (2000 SEK) - More space and better view.
                 Please choose 1 or 2.
                 """.trimIndent()
             }
             else -> {
                 """
                 What type of room would you like? 
-                Option 1: Standard Single Room (800 SEK)
-                Option 2: Deluxe Single Room (1200 SEK)  
-                Option 3: Standard Double Room (1500 SEK)
-                Option 4: Deluxe Double Room (2000 SEK)
+                Option 1: Standard Single Room (800 SEK).
+                Option 2: Deluxe Single Room (1200 SEK).
+                Option 3: Standard Double Room (1500 SEK).
+                Option 4: Deluxe Double Room (2000 SEK).
                 Please choose 1, 2, 3, or 4.
                 """.trimIndent()
             }
         }
 
+        delay(700)
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
         furhat.ask(roomOptions)
     }
 
@@ -357,7 +512,7 @@ val AskRoomType: State = state {
     }
 }
 
-val AskFloorPreference: State = state {
+val AskFloorPreference: State = state(HotelInteraction) {
 
     onEntry {
         // 根据房间类型智能推荐楼层
@@ -366,6 +521,9 @@ val AskFloorPreference: State = state {
             roomType.contains("Deluxe") -> "For our deluxe rooms, I recommend higher floors for better views."
             else -> "We have rooms available on both lower and higher floors."
         }
+
+        delay(700)
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
 
         furhat.ask("$recommendation Would you prefer a lower floor or a higher floor?")
     }
@@ -394,7 +552,7 @@ val AskFloorPreference: State = state {
                 goto(AskBreakfast)
             }
             else -> {
-                users.current.booking.floorPreference = "no preference"
+                users.current.booking.floorPreference = "no preference for floor"
                 furhat.say("No problem. I will assign a suitable floor for you.")
                 goto(AskBreakfast)
             }
@@ -402,7 +560,7 @@ val AskFloorPreference: State = state {
     }
 }
 
-val AskBreakfast: State = state {
+val AskBreakfast: State = state(HotelInteraction) {
 
     onEntry {
         val guests = users.current.booking.numberOfGuests
@@ -416,18 +574,23 @@ val AskBreakfast: State = state {
             else -> "Our breakfast includes fresh pastries, fruits, and hot dishes - a great way to start your day."
         }
 
+        delay(700)
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
+
         furhat.ask("$recommendation Would you like to add breakfast to your stay? It's 100 SEK per person, so $cost SEK for your group.")
     }
 
     onResponse<Yes> {
         users.current.booking.includeBreakfast = true
         val guests = users.current.booking.numberOfGuests
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
         furhat.say("Perfect. Breakfast included for $guests ${if (guests == 1) "person" else "people"}.")
         goto(ConfirmBooking)
     }
 
     onResponse<No> {
         users.current.booking.includeBreakfast = false
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
         furhat.say("Alright, no breakfast included. You can always add it later.")
         goto(ConfirmBooking)
     }
@@ -438,11 +601,13 @@ val AskBreakfast: State = state {
     }
 }
 
-val ConfirmBooking: State = state {
+val ConfirmBooking: State = state(HotelInteraction) {
 
     onEntry {
         users.current.booking.calculatePrice() // 确保价格已计算
         val summary = users.current.booking.summarize()
+        delay(1000)
+        furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
         furhat.ask("Alright. Let me confirm your booking: $summary. Is all this information correct?")
     }
 
@@ -452,16 +617,37 @@ val ConfirmBooking: State = state {
             text.contains("yes") || text.contains("correct") || text.contains("right") || text.contains("confirm") -> {
                 // 生成预订编号
                 val reservationNumber = "KTH${(100000..999999).random()}"
+                furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
                 furhat.say("""
                     Great! Your room has been booked successfully. 
                     Your reservation number is $reservationNumber.
-                    Thank you for choosing KTH Hotel!
+                    Thank you for choosing KTH Hotel! Bye!
                 """.trimIndent())
+                furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
+                delay(800)
+
                 // 重置预订信息
                 userBookings.remove(users.current.id)
-                goto(Idle)
+                //furhat.listen()
+
+//                removeHotelUser(users.current)
+//                val next = hotelWaitingQueue.firstOrNull()
+//                if (next != null) {
+//                    furhat.attend(next)
+//                    goto(HotelGreeting)
+//                } else {
+//                    goto(Idle)
+//                }
+
+
+
+
             }
+
+
+
             text.contains("no") || text.contains("wrong") || text.contains("change") -> {
+                furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
                 furhat.say("I see. Let's start over to make the changes.")
                 // 回到开始重新预订
                 userBookings.remove(users.current.id)
@@ -469,15 +655,18 @@ val ConfirmBooking: State = state {
             }
             text.contains("repeat") || text.contains("again") -> {
                 val summary = users.current.booking.summarize()
+                furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
                 furhat.say("Of course. Let me repeat the details: $summary. Is this correct?")
                 reentry()
             }
             text.contains("price") || text.contains("cost") -> {
                 users.current.booking.calculatePrice()
+                furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
                 furhat.say("The total price is ${users.current.booking.totalPrice} SEK per night. Is this booking correct?")
                 reentry()
             }
             else -> {
+                furhat.gesture(Gestures.Smile(duration =  1.0, strength = 1.0))
                 furhat.say("Please confirm if the information is correct or if you need to make changes.")
                 reentry()
             }

@@ -12,7 +12,7 @@ val Init: State = state {
         /** Set our default interaction parameters */
         users.setSimpleEngagementPolicy(distance = 1.5, maxUsers = 2)
         // furhat.character = "Marty"
-        // furhat.voice = ""
+        // furhat.voice = "Joanna-Neural"
         when {
             users.hasAny() -> {
                 furhat.attend(users.random)
